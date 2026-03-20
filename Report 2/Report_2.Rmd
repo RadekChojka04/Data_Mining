@@ -1,0 +1,1524 @@
+---
+title: "Sprawozdanie 2"
+author: "Radosław Chojka"
+date: "2025-06-04"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    latex_engine: xelatex
+    keep_tex: true
+    dev: "cairo_pdf"
+lang: "pl"
+header-includes:
+   - \usepackage{placeins}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+   - \usepackage{polyglossia}
+   - \setdefaultlanguage{polish}
+   - \renewcommand{\contentsname}{Spis treści}
+   - \usepackage{float}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, fig.width = 8, cache=TRUE, echo = FALSE) 
+``` 
+
+\newpage
+
+# Zadanie 1
+
+## Wprowadzenie
+
+Celem analizy jest zastosowanie poznanych algorytmów klasyfikacji i szczegółowe porównanie ich
+dokładności. Porównanie to będzie uwzględniać następujące algorytmy:
+
+* metoda k-najbliższych sąsiadów (*k-Nearest Neighbors*),
+* drzewa klasyfikacyjne (*classification trees*),
+* naiwny klasyfikator bayesowski (*naive Bayes classifier*).
+
+**Dane**: **PimaIndiansDiabetes2**, biblioteka `mlbench`
+
+* Zbiór danych PimaIndiansDiabetes2 pochodzi z badań przeprowadzonych przez *National Institute of Diabetes and Digestive and Kidney Diseases* i zawiera informacje zdrowotne dotyczące kobiet z plemienia Pima w wieku co najmniej 21 lat. Dane te zostały zebrane w celu zbadania czynników ryzyka występowania cukrzycy typu 2. 
+* Wersja oznaczona jako PimaIndiansDiabetes2 zawiera dodatkowo oznaczone brakujące lub niewiarygodne wartości (np. BMI równe `0` zostało zastąpione przez `NA`), co czyni ją bardziej odpowiednią do wszelkich analiz.
+
+**Rozmiar danych**
+
+```{r, echo=FALSE, cache=TRUE, results='verbatim'}
+library(mlbench)
+data("PimaIndiansDiabetes2")
+dane_NA<-PimaIndiansDiabetes2
+print(dim(dane_NA))
+
+```
+
+**Typy poszczególnych cech:**
+
+```{r, echo=FALSE, cache=TRUE, results='verbatim'}
+
+str(dane_NA, vec.len = 2)
+
+```
+
+* `pregnant` -	Liczba przebytych ciąż
+* `glucose` -	Stężenie glukozy w osoczu po 2 godzinach testu doustnego (mg/dL)
+* `pressure` -	Ciśnienie rozkurczowe krwi (mm Hg)
+* `triceps` -	Grubość fałdu skórnego tricepsa (mm) – pomiar tkanki tłuszczowej
+* `insulin` -	Poziom insuliny w surowicy po 2 godzinach (mu U/ml)
+* `mass` -	Wskaźnik masy ciała (BMI): masa (kg) / [wzrost (m)]²
+* `pedigree` -	Funkcja rodowodu cukrzycy – iloraz dziedziczności cukrzycy w rodzinie
+* `age` -	Wiek pacjentki (w latach)
+* `diabetes` - Klasa diagnostyczna: `pos` oznacza występowanie cukrzycy typu 2,
+a `neg` brak cukrzycy (problem klasyfikacji binarnej)
+
+**Braki danych:**
+
+```{r, results='verbatim'}
+colSums(is.na(dane_NA))
+```
+
+* `pregnant`, `pedigree`, `age`, `diabetes` — te zmienne są kompletne
+
+* `glucose`, `pressure`, `mass` - mają niewielki odsetek braków (mniej niż 5% danych)
+
+* `triceps` (227 braków, ok. `r round((sum(is.na(dane_NA$triceps))/768)*100,2)`%)
+i `insulin` (374 braków, ok. `r round((sum(is.na(dane_NA$insulin))/768)*100,2)`%) - mają dużo braków
+
+Szczególną uwagę zwróciłbym na zmienną `insulin`, która z punktu widzenie medycyny
+może odgrywać kluczową rolę przy predykcji cukrzycy typu 2 i imputacja brakujących
+danych w tym przypadku będzie miała kluczowe znaczenie dla analizy.
+
+Nie można jedynie usunąć wybrakowanych obserwacji, ponieważ stracilibyśmy większość danych.
+
+Zastąpienie `NA` w danej cesze na średnią lub medianę z istniejących wartości w tej kolumnie
+utrudniłoby wiarygodną klasyfikację (model mógłby uczyć się na tych obserwacach 
+nie istniejących lub zakłamanych wzorców).
+
+Przeprowadzę imputację brakujących danych metodą *k-NN* (dla k = 3). Zdecydowałem się na to podejście, ponieważ dobrze sprawdza się nawet przy dużym odsetku braków, o ile pozostałe cechy są wystarczająco informatywne — co w tym przypadku ma miejsce.
+Mam świadomość, że zarówno wybór tej metody, jak i konkretnej wartości parametru jest nieco losowy, jednak rozwiązanie to pozwala uzyskać znacznie bardziej wiarygodne wyniki właściwej analizy niż imputacja braków średnią/medianą, czy też usuwanie obserwacji niekompletnych.
+
+```{r,, message=FALSE, warning=FALSE}
+library(VIM)
+dane <- kNN(dane_NA, k = 3, imp_var = FALSE)
+```
+
+**Rozkład klas:**
+
+```{r}
+tabela_licznosci <- table(dane$diabetes)
+slupki <- barplot(tabela_licznosci,
+                  col = c("lightblue", "salmon"),
+                  main = "Liczności klas",
+                  ylab = "Liczba obserwacji",
+                  ylim = c(0,700))
+text(x = slupki,
+     y = tabela_licznosci,
+     labels = tabela_licznosci,
+     pos = 3)  
+
+```
+
+```{r, echo=FALSE}
+blad <- tabela_licznosci["pos"] / sum(tabela_licznosci)
+chore <- (tabela_licznosci["pos"]/(tabela_licznosci["pos"]+tabela_licznosci["neg"]))*100
+zdrowe <- (tabela_licznosci["neg"]/(tabela_licznosci["pos"]+tabela_licznosci["neg"]))*100
+```
+
+Widoczne są dysproporcje - chore pacjentki stanowią `r round(chore,2)`% obserwacji, natomiast zdrowe `r round(zdrowe,2)`%.
+
+Przypisując wszystkie obiekty do najczęściej występującej klasy (w tym przypadku do `neg`), uzyskalibyśmy błąd
+klasyfikacji `r round(blad,4)*100`%. Jest to punkt wyjścia naszej analizy, każdy stworzony przez nas
+klasyfikator powinien dawać niższy błąd.
+
+**Wariancje poszczególnych cech**:
+```{r}
+dane_num<- dane[,-9]
+wariancje<- apply(dane_num, 2, var)
+print(wariancje)
+boxplot(dane_num, las=3, col=c("lightblue", "salmon"), 
+        main="Wykresy pudełkowe cech ilościowych przed standaryzacją")
+zmienne_standaryzowane <- as.data.frame(scale(dane_num))
+
+dane_stand<- cbind(zmienne_standaryzowane, diabetes = dane$diabetes)
+
+```
+Widoczne są znaczne różnice w zmienności (wariancji) poszczególnych cech, co
+oznacza konieczność zastosowania standaryzacji w przypadku algorytmu *k-NN*, ponieważ
+cechy o większej skali mogą zdominować inne.
+Z kolei dane do algorytmów *drzew decyzyjnych* i *naive Bayes* nie wymagają standaryzacji – 
+metody te są odporne na różnice w skali.
+
+```{r}
+boxplot(zmienne_standaryzowane, las=3, col=c("lightblue", "salmon"), 
+        main="Wykresy pudełkowe cech ilościowych po standaryzacji")
+```
+
+\newpage
+
+**Zmienne charakteryzujące się najlepszymi zdolnościami dyskryminacyjnymi**
+
+```{r}
+cechy <- names(dane)[-9]
+par(mfrow = c(2, 4), mar = c(4, 4, 2, 1))
+
+for (cecha in cechy) {
+  boxplot(dane[[cecha]] ~ dane$diabetes,
+          main = cecha,
+          col = c("lightblue", "salmon"),
+          ylab = cecha,
+          xlab = "diabetes")
+}
+
+par(mfrow = c(1, 1))
+
+```
+
+**Najlepsze zmienne dyskryminacyjne:**
+
+* `glucose`:
+Bardzo wyraźna różnica między medianami: osoby chore mają wyraźnie wyższy poziom glukozy.
+Rozkłady mało nakładają się między klasami.
+
+* `age`:
+Osoby chore mają zauważalnie wyższy wiek.
+Choć rozrzut jest szeroki, różnice między grupami są wyraźne.
+
+* `pregnant`:
+Osoby chore mają większą liczbę przebytych ciąż.
+Mediany i kwartyle różnią się znacznie między grupami.
+
+* `insulin`:
+Mediana u osób chorych jest wyższa, ale występuje duży rozrzut, wiele wartości odstających oraz
+niemalże połowa wartości została imputowana. Jednak ze względu na teoretyczne (z medycznego punktu widzenia) bardzo duże znaczenie tej cechy w predykcji cukrzycy, zdecydowałem się
+ją umieścić w tym zestawieniu (pamiętając, że wymaga ostrożnej interpretacji).
+
+**Najgorsze zmienne dyskryminacyjne:**
+
+* `pressure`, `pedigree`, `triceps` - rozkłady wartości dla grup osób zdrowych i chorych
+są podobne (nakładają się i mają zbliżone mediany).
+
+## Modele {#modelee}
+
+W dalszej części, przy tworzeniu modeli klasyficyjnych, pisząc *Model x*, będę miał
+na myśli model bazujący na następujących zmiennych:
+
+* Model 1: Wszystkie zmienne (`diabetes ~ .`)
+* Model 2: Teoretycznie najlepsze zmienne (bez insuliny)  (`diabetes ~ glucose + age + pregnant`)
+* Model 3: Teoretycznie najlepsze zmienne (z insuliną)  (`diabetes ~ glucose + insulin + age + pregnant`)
+* Model 4: Teoretycznie najgorsze zmienne (`diabetes ~ pressure + pedigree + triceps`)
+
+
+
+Oryginalny zbiór danych dzielę na zbiór uczący i zbiór testowy w sposób losowy w stosunku 2:1.
+
+## Metoda k-NN
+
+**Metoda k-NN (k-Nearest Neighbors)** to nienadzorowana metoda klasyfikacji, która przypisuje nową obserwację do tej klasy, która jest najczęstsza wśród jej k najbliższych sąsiadów w przestrzeni cech. Odległość między punktami najczęściej mierzona jest za pomocą metryki euklidesowej. Metoda nie zakłada żadnych założeń co do rozkładu danych i działa dobrze przy prostych strukturach, jednak może być wrażliwa na skalę zmiennych i liczbę sąsiadów.
+
+```{r}
+
+set.seed(123)
+n <- dim(dane)[1]
+
+# losujemy obiekty do zbioru uczącego i testowego
+learning.set.index <- sample(1:n,2/3*n)
+
+# tworzymy zbiór uczący i testowy
+learning.set <- dane_stand[learning.set.index,]
+test.set <- dane_stand[-learning.set.index,]
+n.test <- dim(test.set)[1]
+n.learning <- dim(learning.set)[1]
+
+# rzeczywiste
+etykietki.rzecz.test <- test.set$diabetes
+etykietki.rzecz.learning<- learning.set$diabetes
+```
+
+**Macierze pomyłek dla** [**Modelu 1.**](#modelee)**:**
+
+```{r}
+library(ipred)
+
+# wszystkie zmienne diabetes ~.
+model.knn.1 <- ipredknn(diabetes ~ ., data=learning.set, k=1)
+model.knn.1a <- ipredknn(diabetes ~ ., data=learning.set, k=5)
+model.knn.1b <- ipredknn(diabetes ~ ., data=learning.set, k=15)
+# najlepsze zmienne(bez insuliny)  diabetes ~ glucose + age + pregnant
+model.knn.2  <- ipredknn(diabetes ~ glucose + age + pregnant, data=learning.set, k=1)
+model.knn.2a <- ipredknn(diabetes ~ glucose + age + pregnant, data=learning.set, k=5)
+model.knn.2b <- ipredknn(diabetes ~ glucose + age + pregnant, data=learning.set, k=15)
+# najlepsze zmienne z insuliną diabetes ~ glucose + insulin + age + pregnant
+model.knn.3  <- ipredknn(diabetes ~ glucose + insulin + age + pregnant, data=learning.set, k=1)
+model.knn.3a <- ipredknn(diabetes ~ glucose + insulin + age + pregnant, data=learning.set, k=5)
+model.knn.3b <- ipredknn(diabetes ~ glucose + insulin + age + pregnant, data=learning.set, k=15)
+# najgorsze zmienne diabetes ~ pressure + pedigree + triceps
+model.knn.4  <- ipredknn(diabetes ~ pressure + pedigree + triceps, data=learning.set, k=1)
+model.knn.4a <- ipredknn(diabetes ~ pressure + pedigree + triceps, data=learning.set, k=5)
+model.knn.4b <- ipredknn(diabetes ~ pressure + pedigree + triceps, data=learning.set, k=15)
+
+
+modele <- list(
+  model.knn.1, model.knn.1a, model.knn.1b,
+  model.knn.2, model.knn.2a, model.knn.2b,
+  model.knn.3, model.knn.3a, model.knn.3b,
+  model.knn.4, model.knn.4a, model.knn.4b
+)
+
+nazwy1 <- c(
+  "Model 1 (k = 1)",
+  "Model 1 (k = 5)",
+  "Model 1 (k = 15)",  
+  "Model 2 (k = 1)",
+  "Model 2 (k = 5)",
+  "Model 2 (k = 15)", 
+  "Model 3 (k = 1)",
+  "Model 3 (k = 5)",
+  "Model 3 (k = 15)", 
+  "Model 4 (k = 1)",
+  "Model 4 (k = 5)",
+  "Model 4 (k = 15)"
+)
+
+
+błędy_learning <- numeric(length(modele))
+błędy_test <- numeric(length(modele))
+macierze_learning <- list()
+macierze_test <- list()
+
+
+for (i in seq_along(modele)) {
+  prog.learning <- predict(modele[[i]], learning.set, type = "class")
+  prog.test     <- predict(modele[[i]], test.set, type = "class")
+  
+  tab.learning <- table(Przewidziane = prog.learning, Rzeczywiste = etykietki.rzecz.learning)
+  tab.test     <- table(Przewidziane =prog.test, Rzeczywiste = etykietki.rzecz.test)
+  
+  blad.learning <- 1 - sum(diag(tab.learning)) / sum(tab.learning)
+  blad.test     <- 1 - sum(diag(tab.test)) / sum(tab.test)
+  
+  błędy_learning[i] <- blad.learning
+  błędy_test[i] <- blad.test
+  macierze_learning[[i]] <- tab.learning
+  macierze_test[[i]] <- tab.test
+}
+
+for (i in 1:3) {
+  cat("\n\nModel:", nazwy1[i])
+  cat("\n--- Zbiór uczący ---\n")
+  print(macierze_learning[[i]])
+  
+  cat("\n--- Zbiór testowy ---\n")
+  print(macierze_test[[i]])
+}
+
+
+
+tabela_bledow <- data.frame(
+  Model = nazwy1,
+  Blad_uczacy = round(100 * błędy_learning, 2),
+  Blad_testowy = round(100 * błędy_test, 2)
+)
+
+
+
+```
+
+**Uwaga!**
+
+Na podstawie wyświetlonych macierzy można zauważyć następujący trend - model częściej myli osoby chore (pos) jako zdrowe (neg), niż zdrowe jako chore, co z punktu widzenia medycyny jest poważniejszym błędem, niż sytuacja odwrotna.
+
+```{r}
+
+library(knitr)
+kable(tabela_bledow, 
+      caption = "Błędy klasyfikacji dla różnych modeli k-NN (%)",
+      col.names = c("Model", "Błąd uczący [%]", "Błąd testowy [%]"),
+      align = "lcc",
+      format = "markdown")
+
+```
+
+**Model o najniższym błędzie testowym**
+
+```{r}
+najlepszy_indeks <- which.min(błędy_test)
+najlepszy_model <- tabela_bledow[najlepszy_indeks, ]
+
+print(najlepszy_model)
+```
+\vspace{1cm}
+
+**Wnioski:**
+
+* Dla k=1, niezależnie od kombinacji zmiennych, model nauczył się danych treningowych idealnie, zapamiętał przypadki, zamiast nauczyć się ogólnych zależności, co wskazuje na przeuczenie.
+* W [Modelu 4.](#modelee) różnica w błędzie dla zbioru uczącego i testowego jest dosyć duża,
+co również może świadczyć o przeuczeniu modelu.
+
+\newpage
+
+**Wpływ wyboru parametru k (liczby sąsiadów) na dokładność klasyfikacji dla rożnych podzbiorów zmiennych, przy użyciu bardziej zaawansowanych schematów oceny dokładności:**
+
+```{r}
+library(ipred)
+
+set.seed(123)
+my.predict  <- function(model, newdata) predict(model, newdata=newdata, type="class")
+my.ipredknn <- function(formula1, data1, ile.sasiadow) ipredknn(formula=formula1,data=data1,k=ile.sasiadow)
+
+
+################# CROSS VALIDATION
+liczba.sasiadow.zakres <- 1:15
+# Model 1: wszystkie cechy diabetes ~.
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~., dane_stand, model=my.ipredknn, predict=my.predict, estimator="cv", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 2: najlepsze zmienne(bez insuliny)  diabetes ~ glucose + age + pregnant
+wyniki2 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="cv", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+# Model 3: najlepsze zmienne z insuliną diabetes ~ glucose + insulin + age + pregnant
+wyniki3 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + insulin + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="cv", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 4: najgorsze zmienne diabetes ~ pressure + pedigree + triceps
+wyniki4 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ pressure + pedigree + triceps, dane_stand, model=my.ipredknn, predict=my.predict, estimator="cv", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+
+blad.zakres <- range(c(wyniki1, wyniki2, wyniki3, wyniki4))
+
+
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, main="Porównanie modeli", xlab="k (liczba sąsiadów)", ylab="błąd klasyfikacji (3-fold Cross-Validation)", ylim=blad.zakres)
+lines(liczba.sasiadow.zakres, wyniki2, type="b", col="red", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki3, type="b", col="blue", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki4, type="b", col="orange", lwd=3)
+legend("topright",legend=c("Model 1","Model 2","Model 3","Model 4"),inset = c(0, 0.3),col=c("green","red","blue","orange"), lwd=3, bg="azure2", cex=.5)
+grid()
+##      c("Model 1","Model 2","Model 3","Model 4")
+##      c("Model 1: diabetes ~.","Model 2: diabetes ~ glucose + age + pregnant","Model 3: diabetes ~ glucose + insulin + age + pregnant", "Model 4: diabetes ~ pressure + pedigree + triceps")
+```
+
+
+```{r}
+######## BOOTSTRAP
+# Model 1: wszystkie cechy diabetes ~.
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~., dane_stand, model=my.ipredknn, predict=my.predict, estimator="boot", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 2: najlepsze zmienne(bez insuliny)  diabetes ~ glucose + age + pregnant
+wyniki2 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="boot", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+# Model 3: najlepsze zmienne z insuliną diabetes ~ glucose + insulin + age + pregnant
+wyniki3 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + insulin + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="boot", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 4: najgorsze zmienne diabetes ~ pressure + pedigree + triceps
+wyniki4 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ pressure + pedigree + triceps, dane_stand, model=my.ipredknn, predict=my.predict, estimator="boot", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+
+blad.zakres <- range(c(wyniki1, wyniki2, wyniki3, wyniki4))
+
+
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, main="Porównanie modeli", xlab="k (liczba sąsiadów)", ylab="błąd klasyfikacji (bootstrap)", ylim=blad.zakres)
+lines(liczba.sasiadow.zakres, wyniki2, type="b", col="red", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki3, type="b", col="blue", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki4, type="b", col="orange", lwd=3)
+legend("topright",legend=c("Model 1","Model 2","Model 3","Model 4"),inset = c(0, 0.3),col=c("green","red","blue","orange"), lwd=3, bg="azure2", cex=.5)
+grid()
+```
+
+```{r}
+######## .632+
+# Model 1: wszystkie cechy diabetes ~.
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~., dane_stand, model=my.ipredknn, predict=my.predict, estimator="632plus", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 2: najlepsze zmienne(bez insuliny)  diabetes ~ glucose + age + pregnant
+wyniki2 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="632plus", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+# Model 3: najlepsze zmienne z insuliną diabetes ~ glucose + insulin + age + pregnant
+wyniki3 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ glucose + insulin + age + pregnant, dane_stand, model=my.ipredknn, predict=my.predict, estimator="632plus", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+# Model 4: najgorsze zmienne diabetes ~ pressure + pedigree + triceps
+wyniki4 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(diabetes ~ pressure + pedigree + triceps, dane_stand, model=my.ipredknn, predict=my.predict, estimator="632plus", est.para=control.errorest(k = 3), ile.sasiadow=k)$error)
+
+
+blad.zakres <- range(c(wyniki1, wyniki2, wyniki3, wyniki4))
+
+
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, main="Porównanie modeli", xlab="k (liczba sąsiadów)", ylab="błąd klasyfikacji (.632+)", ylim=blad.zakres)
+lines(liczba.sasiadow.zakres, wyniki2, type="b", col="red", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki3, type="b", col="blue", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki4, type="b", col="orange", lwd=3)
+legend("topright",legend=c("Model 1","Model 2","Model 3","Model 4"),inset = c(0, 0.3),col=c("green","red","blue","orange"), lwd=3, bg="azure2", cex=.5)
+grid()
+
+```
+
+**Wnioski:**
+
+* W schematach 3-fold Cross-Validation oraz bootstrap widać, że wraz ze wzrastem k (liczby sąsiadów)
+błąd delikatnie się zmniejsza, a w schemacie .632+ błąd oscyluje w podobnych wartościach.
+* Najniższe błędy można zaobserwować dla [Modelu 1. i Modelu 3.](#modelee) . Dla mniejszych k Model 3. wydaje się lepszy, jednak ze wzrostem liczby sąsiadów, błąd klasyfikacyjny dla Modelu 1. jest bardzo zbliżony, a nawet
+nieco mniejszy.
+* [Model 4.](#modelee) wypada zdecydowanie najgorzej niezależnie od parametrów i schematu oceny, co jest zgodne z oczekiwaniami.
+
+\newpage
+
+## Naiwny klasyfikator bayesowski
+
+**Naive Bayes** to nadzorowana metoda klasyfikacji oparta na twierdzeniu Bayesa i założeniu naiwnej niezależności zmiennych cech – tzn. zakłada, że wszystkie cechy są od siebie niezależne warunkowo względem klasy. Model oblicza prawdopodobieństwo przynależności obserwacji do każdej klasy i przypisuje tę o najwyższym prawdopodobieństwie a posteriori.
+
+Poniższe implementacje opierają się na założeniu niezależności zmiennych predykcyjnych – co jest podejściem *naiwnym*, ponieważ w rzeczywistości występują między nimi istotne dodatnie korelacje. Przykładowo, współczynnik korelacji między wiekiem a liczbą ciąż wynosi `r cor(dane$age, dane$pregnant)`, a między poziomem glukozy i insuliny `r cor(dane$glucose, dane$insulin)`. Takie zależności oddalają model od założenia idealnej niezależności i mogą wpływać na jego skuteczność.
+
+* `NaiveBayes(..., usekernel = FALSE)` - dodatkowo zakłada, że warunkowe rozkłady cech są rozkładami gaussowskimi.
+* `NaiveBayes(..., usekernel = TRUE)` - nie zakłada konkretnego rozkładu, zamiast tego estymuje rozkłady jądrowo.
+
+
+
+**Macierze pomyłek dla** [**Modeli 3. i 4.**](#modelee) **(bez wykorzystania jądrowego estymatora gęstości oraz z jego użyciem)**:
+
+```{r}
+set.seed(123)
+library(klaR) 
+
+model.nb.1 <- NaiveBayes(diabetes~., data=learning.set, usekernel=FALSE)
+model.nb.1kernel <- NaiveBayes(diabetes~., data=learning.set, usekernel=TRUE)
+model.nb.2 <- NaiveBayes(diabetes ~ glucose + age + pregnant, data=learning.set, usekernel=FALSE)
+model.nb.2kernel <- NaiveBayes(diabetes ~ glucose + age + pregnant, data=learning.set, usekernel=TRUE)
+model.nb.3 <- NaiveBayes(diabetes ~ glucose + insulin + age + pregnant, data=learning.set, usekernel=FALSE)
+model.nb.3kernel <- NaiveBayes(diabetes ~ glucose + insulin + age + pregnant, data=learning.set, usekernel=TRUE)
+model.nb.4 <- NaiveBayes(diabetes ~ pressure + pedigree + triceps, data=learning.set, usekernel=FALSE)
+model.nb.4kernel <- NaiveBayes(diabetes ~ pressure + pedigree + triceps, data=learning.set, usekernel=TRUE)
+
+modele_nb <- list(
+  model.nb.1, model.nb.1kernel,
+  model.nb.2, model.nb.2kernel,
+  model.nb.3, model.nb.3kernel,
+  model.nb.4, model.nb.4kernel
+)
+
+nazwy_nb <- c(
+  "NB Model 1 (no kernel)",
+  "NB Model 1 (kernel)",
+  "NB Model 2 (no kernel)",
+  "NB Model 2 (kernel)",
+  "NB Model 3 (no kernel)",
+  "NB Model 3 (kernel)",
+  "NB Model 4 (no kernel)",
+  "NB Model 4 (kernel)"
+)
+
+n.test <- nrow(test.set)
+n.learn <- nrow(learning.set)
+
+bledy_nb_ucz <- numeric(length(modele_nb))
+bledy_nb_test <- numeric(length(modele_nb))
+macierze_nb_ucz <- vector("list", length(modele_nb))
+macierze_nb_test <- vector("list", length(modele_nb))
+
+for (i in seq_along(modele_nb)) {
+
+  pred_ucz <- predict(modele_nb[[i]], newdata = learning.set)$class
+  macierz_ucz <- table(Przewidziane = pred_ucz, Rzeczywiste = learning.set$diabetes)
+  macierze_nb_ucz[[i]] <- macierz_ucz
+  bledy_nb_ucz[i] <- (n.learn - sum(diag(macierz_ucz))) / n.learn
+  
+
+  pred_test <- predict(modele_nb[[i]], newdata = test.set)$class
+  macierz_test <- table(Przewidziane = pred_test, Rzeczywiste = test.set$diabetes)
+  macierze_nb_test[[i]] <- macierz_test
+  bledy_nb_test[i] <- (n.test - sum(diag(macierz_test))) / n.test
+}
+
+
+for (i in 5:8) {
+  cat("Model:", nazwy_nb[i], "\n")
+  cat("\n--- Zbiór uczący ---\n")
+  print(macierze_nb_ucz[[i]])
+  
+  cat("\n--- Zbiór testowy ---\n")
+  print(macierze_nb_test[[i]])
+  cat("\n")
+}
+
+```
+
+```{r}
+set.seed(123)
+library(knitr)
+
+tabela_bledow_nb <- data.frame(
+  Model = nazwy_nb,
+  Blad_uczacy_procent = round(100 * bledy_nb_ucz, 2),
+  Blad_testowy_procent = round(100 * bledy_nb_test, 2)
+)
+
+kable(
+  tabela_bledow_nb,
+  caption = "Błędy klasyfikacji modeli Naive Bayes na zbiorze uczącym i testowym [%]",
+  col.names = c("Model", "Błąd uczący [%]", "Błąd testowy [%]"),
+  align = c("l", "r", "r"),
+  format = "markdown"
+)
+
+
+```
+
+
+**Model o najniższym błędzie testowym**
+
+```{r}
+najlepszy_indeks <- which.min(bledy_nb_test)
+najlepszy_model <- tabela_bledow_nb[najlepszy_indeks, ]
+
+print(najlepszy_model)
+```
+
+
+**Wnioski:**
+
+* Zaróno dla zbioru uczącego jak i testowego zastosowanie jądrowej estymacji gęstości, obniża wartość 
+błędu klasyfikacji.
+* Najniższe błędy wykazują [modele 1. i 3.](#modelee), zaś najwyższy [model 4.](#modelee)
+* Nie widać żadnego szczególnego przypadku, gdzie moglibyśmy podejrzewać przeuczenie modelu.
+
+\vspace{1cm}
+
+**Bardziej zaawansowane schematy oceny dokładności**
+
+```{r}
+library(ipred)
+library(e1071)
+
+my.predict  <- function(model, newdata) {
+  predict(model, newdata = newdata, type = "class")
+}
+
+my.naiveBayes <- function(formula, data) {
+  naiveBayes(formula = formula, data = data)
+}
+
+formuly <- list(
+  diabetes ~ ., 
+  diabetes ~ glucose + age + pregnant,
+  diabetes ~ glucose + insulin + age + pregnant,
+  diabetes ~ pressure + pedigree + triceps
+)
+
+nazwy_modeli <- c(
+  "NB Model 1",
+  "NB Model 2",
+  "NB Model 3",
+  "NB Model 4"
+)
+
+blad_cv <- numeric(4)
+blad_boot <- numeric(4)
+blad_632 <- numeric(4)
+
+for (i in seq_along(formuly)) {
+  blad_cv[i] <- errorest(
+    formuly[[i]], data = dane, model = my.naiveBayes, predict = my.predict,
+    estimator = "cv", est.para = control.errorest(k = 10)
+  )$err
+
+  blad_boot[i] <- errorest(
+    formuly[[i]], data = dane, model = my.naiveBayes, predict = my.predict,
+    estimator = "boot", est.para = control.errorest(nboot = 20)
+  )$err
+
+  blad_632[i] <- errorest(
+    formuly[[i]], data = dane, model = my.naiveBayes, predict = my.predict,
+    estimator = "632plus", est.para = control.errorest(nboot = 20)
+  )$err
+}
+
+
+library(knitr)
+
+tabela <- data.frame(
+  Model = nazwy_modeli,
+  `Błąd CV [%]` = round(100 * blad_cv, 2),
+  `Błąd bootstrap [%]` = round(100 * blad_boot, 2),
+  `Błąd .632+ [%]` = round(100 * blad_632, 2)
+)
+
+kable(
+  tabela,
+  caption = "Porównanie błędów klasyfikacji modeli Naive Bayes (CV, Bootstrap, .632+)",
+  align = "lrrr",
+  col.names = c("Model", "Błąd CV [%]", "Błąd bootstrap [%]", "Błąd .632+ [%]"),
+  format = "markdown"
+)
+
+```
+
+**Wnioski:**
+
+* Przy użyciu wszystkich wymienionych powyżej zaawansowanych schematów oceny dokładności,
+najniższą wartość błędu wykazuje [Model 1.](#modelee)
+* Trudno jednoznacznie stwierdzić, który zaawansowany schemat oceny błędu jest najlepszy, bo w zależności
+od kombinacji zmiennych różne schematy wskazują najniższy błąd klasyfikacyjny.
+
+\newpage
+
+## Drzewa klasyfikacyjne
+
+Drzewa klasyfikacyjne to popularna metoda klasyfikacji, w której dane są dzielone na podzbiory na podstawie wartości zmiennych wejściowych. Model ma strukturę drzewa, gdzie każdy węzeł odpowiada regule decyzyjnej (np. glucose > 120), a liście reprezentują klasy decyzyjne (np. "chory", "zdrowy"). Klasyfikacja nowej obserwacji polega na przejściu przez drzewo zgodnie z wartościami jej cech aż do odpowiedniego liścia. Metoda ta jest intuicyjna, łatwa do wizualizacji i dobrze radzi sobie z danymi zarówno liczbowymi, jak i kategorycznymi. Aby uniknąć przeuczenia, często stosuje się przycinanie drzewa
+
+```{r}
+library(rpart)
+library(rpart.plot)
+set.seed(123) 
+model.1 <- diabetes ~ .
+model.2 <- diabetes ~ glucose + age + pregnant
+model.3 <- diabetes ~ glucose + insulin + age + pregnant
+model.4 <- diabetes ~ pressure + pedigree + triceps
+
+```
+
+\large [**Model 1**](#modelee)
+
+```{r}
+Diabetes.tree.simple1 <- rpart(model.1, data=learning.set)
+rpart.plot(Diabetes.tree.simple1, main = "Drzewo klasyfikacyjne")
+
+# prognozy dla zbioru uczącego
+pred.labels.learning1 <- predict(Diabetes.tree.simple1, newdata=learning.set, type = "class")
+
+# prognozy dla zbioru testowego
+pred.labels.test1 <- predict(Diabetes.tree.simple1, newdata=test.set, type = "class")
+
+# wyznaczenie prognozowanych prawdopodobieństw a posteriori
+pred.probs.test1 <- predict(Diabetes.tree.simple1, newdata=test.set, type = "prob")
+
+conf.mat.test1 <- table(pred.labels.test1, test.set$diabetes)
+
+
+conf.mat.learning1 <- table(pred.labels.learning1, learning.set$diabetes)
+
+library(knitr)
+kable(
+  conf.mat.learning1,
+  caption = "Macierz pomyłek – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test1,
+  caption = "Macierz pomyłek – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning1 <- round((n.learning - sum(diag(conf.mat.learning1)))*100 / n.learning,2)
+error.rate.test1 <- round((n.test - sum(diag(conf.mat.test1)))*100 / n.test,2)
+
+```
+Błąd na zbiorze uczącym wynosi `r error.rate.learning1`%, a na zbiorze testowym `r error.rate.test1`%.
+
+\newpage
+
+**Konstrukcja złożonego drzewa**
+
+```{r}
+
+Diabetes.tree.complex1  <- rpart(model.1, data=learning.set, control=rpart.control(cp=.01, minsplit=5, maxdepth=20))
+
+rpart.plot(Diabetes.tree.complex1, main="Złożone drzewo przed przycięciem")
+```
+
+<span id="ideaa"></span>
+Przycinamy drzewo wg *reguły 1SE* (jednego błędu standardowego).
+
+**Idea:**
+
+* Odczytujemy najmniejszy błąd kroswalidacyjny (`xerror.min`)  oraz jego odch.stand. (`xstd.min`)
+* Następnie szukamy największej wartości `cp` (odpowiadającej najmniejszej złożoności modelu), dla której spełniony jest warunek: błąd kroswalidacyjny < `xerror.min` + `xstd.min`
+
+```{r}
+
+cptab1 <- Diabetes.tree.complex1$cptable
+print(cptab1)
+
+min_error1 <- min(cptab1[, "xerror"])
+se_min1 <- cptab1[which.min(cptab1[, "xerror"]), "xstd"]
+cp_1se1 <- cptab1[which(cptab1[, "xerror"] <= min_error1 + se_min1)[1], "CP"]
+```
+
+Minimalny błąd kroswalidacyjny: `r min_error1` i odpowiadające mu odchylenie standardowe: `r se_min1`
+
+Największe `CP` przy `xerror` < `xerror.min` + `xstd.min`: `r cp_1se1`
+
+```{r}
+plotcp(Diabetes.tree.complex1)
+abline(h = min_error1 + se_min1, col = "red", lty = 2)
+abline(h = min_error1, col = "green", lty = 2)          
+legend("topright",                              
+       legend = c("Minimalny błąd", "Granica 1-SE"),  
+       col = c("green", "red"),                
+       lty = 2,                                       
+       box.lty = 0,                                     
+       cex = 0.8) 
+
+
+Diabetes.tree.pruned1 <- prune(Diabetes.tree.complex1, cp = cp_1se1)
+
+rpart.plot(Diabetes.tree.pruned1, main = "Drzewo przycięte wg zasady 1-SE")
+
+```
+
+\newpage
+
+**Macierze pomyłek dla złożonych drzew**
+
+
+```{r}
+# prognozy dla zbioru uczącego
+pred.labels.learning1a <- predict(Diabetes.tree.complex1, newdata=learning.set, type = "class")
+pred.labels.learning1b <- predict(Diabetes.tree.pruned1, newdata=learning.set, type = "class")
+# prognozy dla zbioru testowego
+pred.labels.test1a <- predict(Diabetes.tree.complex1, newdata=test.set, type = "class")
+pred.labels.test1b <- predict(Diabetes.tree.pruned1, newdata=test.set, type = "class")
+# wyznaczenie prognozowanych prawdopodobieństw a posteriori
+pred.probs.test1a <- predict(Diabetes.tree.complex1, newdata=test.set, type = "prob")
+pred.probs.test1b <- predict(Diabetes.tree.pruned1, newdata=test.set, type = "prob")
+
+conf.mat.test1a <- table(pred.labels.test1a, test.set$diabetes)
+conf.mat.learning1a <- table(pred.labels.learning1a, learning.set$diabetes)
+
+conf.mat.test1b <- table(pred.labels.test1b, test.set$diabetes)
+conf.mat.learning1b <- table(pred.labels.learning1b, learning.set$diabetes)
+
+
+library(knitr)
+kable(
+  conf.mat.learning1a,
+  caption = "Macierz pomyłek (przed przycięciem) – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test1a,
+  caption = "Macierz pomyłek (przed przycięciem) – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning1a <- round((n.learning - sum(diag(conf.mat.learning1a)))*100 / n.learning,2)
+error.rate.test1a <- round((n.test - sum(diag(conf.mat.test1a)))*100 / n.test,2)
+
+kable(
+  conf.mat.learning1b,
+  caption = "Macierz pomyłek (po przycięciu) – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test1b,
+  caption = "Macierz pomyłek (po przycięciu) – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning1b <- round((n.learning - sum(diag(conf.mat.learning1b)))*100 / n.learning,2)
+error.rate.test1b <- round((n.test - sum(diag(conf.mat.test1b)))*100 / n.test,2)
+
+```
+Błąd na zbiorze uczącym przed przycięciem drzewa wynosi `r error.rate.learning1a`%, a na zbiorze testowym `r error.rate.test1a`%, taka różnica może wskazywać na przeuczenie modelu.
+
+Błąd na zbiorze uczącym po przycięciu drzewa wynosi `r error.rate.learning1b`%, a na zbiorze testowym `r error.rate.test1b`%.
+
+Przycięcie drzewa spowodowało poprawę dokładności modelu.
+
+\newpage
+
+\large [**Model 3**](#modelee) 
+
+Zdecydowałem się dokładniej przeanalizować również ten model, ponieważ po wynikach poprzednich analiz widać, że oprócz modelu z wszystkimi cechami, ten ma największy potencjał.
+
+```{r}
+Diabetes.tree.simple3 <- rpart(model.3, data=learning.set)
+rpart.plot(Diabetes.tree.simple3, main = "Drzewo klasyfikacyjne")
+
+# prognozy dla zbioru uczącego
+pred.labels.learning3 <- predict(Diabetes.tree.simple3, newdata=learning.set, type = "class")
+
+# prognozy dla zbioru testowego
+pred.labels.test3 <- predict(Diabetes.tree.simple3, newdata=test.set, type = "class")
+
+# wyznaczenie prognozowanych prawdopodobieństw a posteriori
+pred.probs.test3 <- predict(Diabetes.tree.simple3, newdata=test.set, type = "prob")
+
+conf.mat.test3 <- table(pred.labels.test3, test.set$diabetes)
+
+
+conf.mat.learning3 <- table(pred.labels.learning3, learning.set$diabetes)
+
+library(knitr)
+kable(
+  conf.mat.learning3,
+  caption = "Macierz pomyłek – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test3,
+  caption = "Macierz pomyłek – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning3 <- round((n.learning - sum(diag(conf.mat.learning3)))*100 / n.learning,2)
+error.rate.test3 <- round((n.test - sum(diag(conf.mat.test3)))*100 / n.test,2)
+
+```
+Błąd na zbiorze uczącym wynosi `r error.rate.learning3`%, a na zbiorze testowym `r error.rate.test3`%.
+
+\newpage
+
+**Konstrukcja złożonego drzewa**
+
+```{r}
+
+Diabetes.tree.complex3  <- rpart(model.3, data=learning.set, control=rpart.control(cp=.01, minsplit=5, maxdepth=20))
+
+rpart.plot(Diabetes.tree.complex3, main="Złożone drzewo przed przycięciem")
+```
+
+[Przycinamy drzewo wg *reguły 1SE* (jednego błędu standardowego).](#ideaa)
+
+```{r}
+
+cptab3 <- Diabetes.tree.complex3$cptable
+print(cptab3)
+
+min_error3 <- min(cptab3[, "xerror"])
+se_min3 <- cptab3[which.min(cptab3[, "xerror"]), "xstd"]
+cp_1se3 <- cptab3[which(cptab3[, "xerror"] <= min_error3 + se_min3)[1], "CP"]
+```
+
+Minimalny błąd kroswalidacyjny: `r min_error3` i odpowiadające mu odchylenie standardowe: `r se_min3`
+
+Największe `CP` przy `xerror` < `xerror.min` + `xstd.min`: `r cp_1se3`
+
+```{r}
+plotcp(Diabetes.tree.complex3)
+abline(h = min_error3 + se_min3, col = "red", lty = 2)
+abline(h = min_error3, col = "green", lty = 2)          
+legend("topright",                              
+       legend = c("Minimalny błąd", "Granica 1-SE"),  
+       col = c("green", "red"),                
+       lty = 2,                                       
+       box.lty = 0,                                     
+       cex = 0.8) 
+
+
+Diabetes.tree.pruned3 <- prune(Diabetes.tree.complex3, cp = cp_1se3)
+
+rpart.plot(Diabetes.tree.pruned3, main = "Drzewo przycięte wg zasady 1-SE")
+
+```
+
+**Macierze pomyłek dla złożonych drzew**
+
+
+```{r}
+# prognozy dla zbioru uczącego
+pred.labels.learning3a <- predict(Diabetes.tree.complex3, newdata=learning.set, type = "class")
+pred.labels.learning3b <- predict(Diabetes.tree.pruned3, newdata=learning.set, type = "class")
+# prognozy dla zbioru testowego
+pred.labels.test3a <- predict(Diabetes.tree.complex3, newdata=test.set, type = "class")
+pred.labels.test3b <- predict(Diabetes.tree.pruned3, newdata=test.set, type = "class")
+# wyznaczenie prognozowanych prawdopodobieństw a posteriori
+pred.probs.test3a <- predict(Diabetes.tree.complex3, newdata=test.set, type = "prob")
+pred.probs.test3b <- predict(Diabetes.tree.pruned3, newdata=test.set, type = "prob")
+
+conf.mat.test3a <- table(pred.labels.test3a, test.set$diabetes)
+conf.mat.learning3a <- table(pred.labels.learning3a, learning.set$diabetes)
+
+conf.mat.test3b <- table(pred.labels.test3b, test.set$diabetes)
+conf.mat.learning3b <- table(pred.labels.learning3b, learning.set$diabetes)
+
+
+library(knitr)
+kable(
+  conf.mat.learning3a,
+  caption = "Macierz pomyłek (przed przycięciem) – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test3a,
+  caption = "Macierz pomyłek (przed przycięciem) – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning3a <- round((n.learning - sum(diag(conf.mat.learning3a)))*100 / n.learning,2)
+error.rate.test3a <- round((n.test - sum(diag(conf.mat.test3a)))*100 / n.test,2)
+
+kable(
+  conf.mat.learning3b,
+  caption = "Macierz pomyłek (po przycięciu) – zbiór uczący",
+  align = "c"
+)
+
+kable(
+  conf.mat.test3b,
+  caption = "Macierz pomyłek (po przycięciu) – zbiór testowy",
+  align = "c"
+)
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+error.rate.learning3b <- round((n.learning - sum(diag(conf.mat.learning3b)))*100 / n.learning,2)
+error.rate.test3b <- round((n.test - sum(diag(conf.mat.test3b)))*100 / n.test,2)
+
+```
+Błąd na zbiorze uczącym przed przycięciem drzewa wynosi `r error.rate.learning3a`%, a na zbiorze testowym `r error.rate.test3a`%, co może wskazywać na lekkie przeuczenie modelu tego drzewa.
+
+Błąd na zbiorze uczącym po przycięciu drzewa wynosi `r error.rate.learning3b`%, a na zbiorze testowym `r error.rate.test3b`%.
+
+Można zauważyć delikatny wzrost błędu po przycięciu, jednak to nie musi oznaczać, że przycięcie było złe.
+Oznacza raczej, że model stał się bardziej ogólny, stabilniejszy, kosztem lekkiego pogorszenia dokładności.
+
+**Bardziej zaawansowane schematy oceny dokładności**
+
+```{r}
+# Wczytanie bibliotek
+library(ipred)
+library(rpart)
+library(knitr)
+
+# Funkcja predykcji — drzewo klasyfikacyjne
+my.predict.tree <- function(model, newdata) {
+  predict(model, newdata = newdata, type = "class")
+}
+
+# Funkcja do trenowania drzewa klasyfikacyjnego
+my.tree <- function(formula, data) {
+  rpart(formula = formula, data = data, method = "class")
+}
+
+# Lista formuł
+formuly <- list(
+  diabetes ~ ., 
+  diabetes ~ glucose + age + pregnant,
+  diabetes ~ glucose + insulin + age + pregnant,
+  diabetes ~ pressure + pedigree + triceps
+)
+
+nazwy_modeli <- c(
+  "Tree Model 1",
+  "Tree Model 2",
+  "Tree Model 3",
+  "Tree Model 4"
+)
+
+# Wektory na wyniki błędów
+blad_cv <- numeric(4)
+blad_boot <- numeric(4)
+blad_632 <- numeric(4)
+
+# Obliczanie błędów klasyfikacji dla każdej formuły
+for (i in seq_along(formuly)) {
+  blad_cv[i] <- errorest(
+    formuly[[i]], data = dane, model = my.tree, predict = my.predict.tree,
+    estimator = "cv", est.para = control.errorest(k = 10)
+  )$err
+
+  blad_boot[i] <- errorest(
+    formuly[[i]], data = dane, model = my.tree, predict = my.predict.tree,
+    estimator = "boot", est.para = control.errorest(nboot = 20)
+  )$err
+
+  blad_632[i] <- errorest(
+    formuly[[i]], data = dane, model = my.tree, predict = my.predict.tree,
+    estimator = "632plus", est.para = control.errorest(nboot = 20)
+  )$err
+}
+
+# Tabela z wynikami
+tabela <- data.frame(
+  Model = nazwy_modeli,
+  `Błąd CV [%]` = round(100 * blad_cv, 2),
+  `Błąd bootstrap [%]` = round(100 * blad_boot, 2),
+  `Błąd .632+ [%]` = round(100 * blad_632, 2)
+)
+
+# Wyświetlenie tabeli w knitr
+kable(
+  tabela,
+  caption = "Porównanie błędów klasyfikacji modeli drzewa decyzyjnego (CV, Bootstrap, .632+)",
+  align = "lrrr",
+  col.names = c("Model", "Błąd CV [%]", "Błąd bootstrap [%]", "Błąd .632+ [%]"),
+  format = "markdown"
+)
+
+```
+
+**Wnioski:**
+
+* [Model 1](#modelee) uzyskał najniższy błąd klasyfikacji w dwóch metodach oceny, co może sugerować, że jest to najlepszy model spośród czterech pod względem ogólnej zdolności generalizacji.
+
+* [Model 4](#modelee) wykazuje zdecydowanie najwyższe błędy, co oznacza, że jest to najsłabsza kombinacja zmiennyc.
+
+* Różnice między błędami dla każdej metody w ramach danego modelu są stosunkowo niewielkie.
+
+## Podsumowanie
+
+* W przypadku metody k-NN i naive Bayes model częściej myli osoby chore jako zdrowe, niż zdrowe jako chore, co z punktu widzenia medycyny jest poważniejszym błędem, niż sytuacja odwrotna, która znacznie częściej występowała w macierzach pomyłek drzew klasyfikacyjnych.
+
+* Najlepszy wynik (błąd klasyfikacyjny na zbiorze testowym = 17,97%) otrzymano dla **Modelu 3.**,
+czyli kombinacji cech takich jak: glukoza, insulina, wiek, liczba ciąż, metodą drzew decyzyjnych, po przycięciu złożonego drzewa.
+
+* W przypadku analizowanych danych lepsze rezultaty, które były zbliżone do siebie (większy wpływ miał wybór zmiennych) dawały metody k-NN i drzew decyzyjnych, zaś metoda naive Bayes wykazywała praktycznie zawsze większe błędy, mogło to być spowodowane faktem, że niektore zmienne były ze sobą skorelowane np. insulina i glukoza, wiek i liczba przebytych ciąż. Więc założenie o niezależności cech było rzeczywiście w tym przypadku *naiwne*.
+
+* Wybór schematu oceny dokładności miał istotny wpływ na końcowe wnioski dotyczące skuteczności analizowanych metod klasyfikacji. Choć zastosowane zaawansowane metody oceny – krzyżowa walidacja oraz metody bootstrapowe – dawały na ogół zbliżone do siebie wyniki, to jednak pozwalały na bardziej wiarygodną ocenę zdolności modeli do generalizacji
+
+* Warto ponownie podkreślić kluczową rolę zmiennej insulina, a zwłaszcza jej braków w danych, które miały kluczowy wpływ na jakość wyników. Dowodem na to jest fakt, że modele trenowane na podzbiorze danych zawierającym insulinę osiągały niemal we wszystkich przypadkach lepsze rezultaty niż ich odpowiedniki bez tej zmiennej. 
+
+* Analiza wykazała, że najlepsze rezultaty uzyskano przy wykorzystaniu wszystkich dostępnych zmiennych (Model 1.) lub podzbioru: glukozy, insuliny, wieku i liczby ciąż (Model 3.). Oba podejścia dawały bardzo zbliżone wyniki, jednak w przypadku Modelu 3. imputowanie blisko 50% brakujących wartości insuliny najprawdopodobniej wprowadziło dodatkowy szum, co negatywnie wpłynęło na jego skuteczność.
+
+* Imputowanie brakujących wartości insuliny w Modelu 1. również wprowadziło szum, jednak różnica polega na tym, że Model 1. korzysta z większej liczby zmiennych, więc negatywny wpływ imputacji mógł zostać częściowo *rozmyty* przez obecność innych silnych predyktorów. W Modelu 3., który opiera się tylko na czterech zmiennych (w tym insulina), szum pochodzący z imputacji miał większy wpływ na wyniki, ponieważ każda zmienna ma większe znaczenie dla działania modelu.
+
+\newpage
+
+# Zadanie 2
+
+## Wprowadzenie
+
+Zadanie to jest kontynuacją zad. 1 i wykonujemy je dla uprzednio wybranych danych.
+Celem analizy jest zastosowanie (wybranych) zaawansowanych metod klasyfikacji. Porównanie
+to będzie uwzględniać następujące algorytmy:
+
+* Bagging (*ensemble learning*),
+* Random forest (*ensemble learning*),
+* Metoda wektorów nośnych (*SVM*).
+
+**Dane**: **PimaIndiansDiabetes2**, biblioteka `mlbench`
+
+**Braki danych:**
+
+Ponownie przeprowadzę imputację brakujących danych metodą *k-NN* (dla k = 3).
+
+```{r, message=FALSE, warning=FALSE}
+library(VIM)
+dane <- kNN(dane_NA, k = 3, imp_var = FALSE)
+library(ipred)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+## Porównanie klasyfikatorów złożonych
+
+Analizę przeprowadzam dla modelu wykorzystującego wszystkie dostępne cechy. W przypadku *Random Forest*, mimo pełnego zestawu cech, każde drzewo budowane jest na losowym podzbiorze zmiennych.
+
+### Single tree (pojedyńcze drzewo klasyfikacyjne)
+
+```{r}
+tree <- rpart(diabetes~., data=dane) #parametry domyślne
+rpart.plot(tree, main="Drzewo klasyfikacyjne - dane PimaIndiansDiabetes2", cex=.5)
+```
+
+\newpage
+
+### Bagging
+
+**Struktura:**
+
+```{r}
+btree <- bagging(diabetes~., data=dane, nbagg=25, minsplit=1, cp=0)
+
+cat("Bagging model (25 drzew):\n")
+cat("Liczba replikacji (nbagg):", length(btree$mtrees), "\n")
+cat("Parametry drzewa: minsplit = 1 , cp = 0" , "\n")
+```
+
+**Jak liczba replikacji B (parametr nbagg) wpływa na dokładność modelu?**
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE }
+set.seed(123)
+B.vector <- c(5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100)
+bagging.error.rates <- sapply(B.vector, function(b)  { errorest(diabetes~., data=dane, model=bagging, nbagg=b, estimator="632plus", est.para=control.errorest(nboot = 20))$error})
+```
+
+```{r}
+plot(B.vector, bagging.error.rates, xlab="B", main="Wpływ liczby replikacji B na błąd klasyfikacji", type="b")
+grid()
+```
+
+* Wzrost liczby replikacji *B* wpływa korzystnie na dokładność modelu – błąd klasyfikacji wyraźnie maleje przy przejściu z bardzo małych wartości *B* (np. 5) do wartości średnich (w zakresie 20–50). Oznacza to, że dodanie kolejnych drzew w tym przedziale znacząco poprawia jakość modelu.
+
+* Po osiągnięciu liczby replikacji rzędu 40–50 obserwuje się stabilizację błędu –
+dalsze zwiększanie *B* nie przynosi już istotnych korzyści w zakresie dokładności.
+
+### Random Forest (lasy losowe)
+
+**Struktura:**
+
+```{r}
+p <-  ncol(dane) - 1
+
+# różne parametry  (ntree - liczba drzew, mtry - liczba wybieranych losowo cech)
+
+rf.2 <- randomForest(diabetes~., data=dane, ntree=100, mtry=sqrt(p), importance=TRUE)
+
+cat("Liczba drzew:", rf.2$ntree, "\n")
+cat("Liczba wybieranych losowo cech:", rf.2$mtry, "\n")
+cat("Błąd OOB (średni):", mean(rf.2$err.rate[,1]), "\n")
+
+
+
+```
+
+**Macierz pomyłek na bazie OOB (***Out-Of-Bag***), tzn. obserwacji, które nie były wybierane w danej replikacji**
+
+```{r}
+# prognozowane klasy
+pred.labels <- predict(rf.2, newdata=dane, type="class")
+real.labels <- dane$diabetes
+#(confusion.matrix <- table(pred.labels, real.labels)) # dla zbioru uczącego
+
+# prognozowane p-stwa a posteriori
+pred.probs <- predict(rf.2, newdata=dane, type="prob")
+
+# macierz pomyłek (confusion matrix)  na bazie OOB (Out-Of-Bag), tzn. obserwacji, 
+# które nie były wybierane w danej replikacji
+rf.2$confusion
+```
+
+
+```{r}
+
+plot(rf.2, main = "Wykres błędu klasyfikacji w zależności od liczby drzew (wielkości lasu)")
+grid()
+legend("topright",                          # pozycja legendy
+       legend = colnames(rf.2$err.rate),   # etykiety klas + Overall
+       col = 1:ncol(rf.2$err.rate),        # kolory linii
+       lty = 1,                            # typ linii (ciągła)
+       cex = 0.8)  
+```
+
+* Dodanie kilku pierwszych drzew znacząco poprawia dokładność modelu, ponieważ kolejne drzewa redukują błąd przez uśrednianie wyników.
+
+* Po osiągnięciu określonej liczby drzew (w tym przypadku ok. 30), dalsze ich dodawanie nie przynosi już istotnej poprawy (błąd się stabilizuje).
+
+
+**Ranking ważności cech:**
+
+```{r}
+
+varImpPlot(rf.2,main = "Ranking ważności cech")
+
+```
+
+\newpage
+
+**Porównanie dokładności metod (metoda .632+)**
+
+```{r}
+
+set.seed(123)
+
+mypredict.rpart <- function(object, newdata) { predict(object, newdata = newdata, type = "class")}
+
+
+error.tree <- errorest(diabetes ~ ., data = dane, model = rpart,
+                       predict = mypredict.rpart, estimator = "632plus",
+                       est.para = control.errorest(nboot = 20))
+
+error.bagging <- errorest(diabetes ~ ., data = dane, model = bagging,
+                          estimator = "632plus",
+                          est.para = control.errorest(nboot = 20))
+
+error.randomForest <- errorest(diabetes ~ ., data = dane, model = randomForest,
+                               estimator = "632plus",
+                               est.para = control.errorest(nboot = 20))
+```
+
+
+```{r, fig.pos='H'}
+library(tibble)
+library(kableExtra)
+
+error_results <- tibble::tibble(
+  Metoda = c("Single Tree", "Bagging", "Random Forest"),
+  `Błąd klasyfikacji` = c(error.tree$error,
+                          error.bagging$error,
+                          error.randomForest$error)
+)
+
+knitr::kable(error_results, format = "latex", digits = 4,
+             caption = "Szacowany błąd klasyfikacji (.632+)")
+```
+
+
+
+```{r, fig.pos='H'}
+reduction_bagging <- (error.tree$error - error.bagging$error) / error.tree$error * 100
+reduction_rf      <- (error.tree$error - error.randomForest$error) / error.tree$error * 100
+
+
+reduction_table <- tibble::tibble(
+  Porównanie = c("Bagging vs. Single Tree", "Random Forest vs. Single Tree"),
+  `Redukcja błędu (%)` = c(reduction_bagging, reduction_rf)
+)
+
+knitr::kable(reduction_table, format = "latex", digits = 2,
+             caption = "Względna redukcja błędu klasyfikacji")
+
+```
+
+
+* Zarówno *Bagging*, jak i *Random Forest* znacząco zmniejszają błąd klasyfikacji w porównaniu do pojedynczego drzewa.
+
+* *Random Forest* wypadł lepiej, ponieważ wprowadza dodatkową losowość przy wyborze cech dla każdego drzewa, co zmniejsza korelacje między drzewami i pozwala lepiej wychwytywać różnorodne wzorce w danych. Dzięki temu model jest bardziej odporny na przeuczenie i lepiej generalizuje na nowych danych niż *Bagging*, który korzysta z pełnego zestawu cech.
+
+## Metoda wektorów nośnych (SVM)
+
+Oryginalny zbiór danych dzielę na zbiór uczący i zbiór testowy w sposób losowy w stosunku 2:1.
+Modele tworzone są wyłącznie na podstawie dwóch zmiennych: `glucose` i `insulin`, które zostały najwyżej ocenione w rankingu ważności cech opracowanym na podstawie lasów losowych.
+
+```{r}
+library(e1071)
+library(mlbench)
+set.seed(123)
+
+n <- nrow(dane)
+learn.ind    <- sample(1:n, 2/3*n)
+training.set <- dane[learn.ind,]
+test.set     <- dane[-learn.ind,]
+```
+
+### Jądro liniowe dla róźnych wartości parametru kosztu
+
+W celu porównania skuteczności klasyfikacji zastosuję trzy modele SVM z liniowym jądrem, różniące się wartością parametru kosztu *C* (odpowiadającego za karę za błędną klasyfikację): 0.1, 1 oraz 10.
+
+```{r,fig.cap= "Model SVM liniowy (C = 0.1)"}
+svm.linear.C0.1 <- svm(diabetes~glucose+insulin, data=training.set, kernel="linear", cost=0.1)
+plot(svm.linear.C0.1, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r,fig.cap= "Model SVM liniowy (C = 1)"}
+svm.linear.C1 <- svm(diabetes~glucose+insulin, data=training.set, kernel="linear", cost=1)
+plot(svm.linear.C1, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r,fig.cap= "Model SVM liniowy (C = 10)"}
+svm.linear.C10 <- svm(diabetes~glucose+insulin, data=training.set, kernel="linear", cost=10)
+plot(svm.linear.C10, data=dane, glucose~insulin, svSymbol=16, grid=100)
+```
+
+
+```{r}
+
+
+real.labels <- test.set$diabetes
+n.test <- length(real.labels)
+
+
+pred.svm.lin.C0.1 <- predict(svm.linear.C0.1, newdata = test.set)
+error.svm.lin.C0.1 <- 1 - sum(pred.svm.lin.C0.1 == test.set$diabetes) / n.test
+
+
+pred.svm.lin.C1 <- predict(svm.linear.C1, newdata = test.set)
+error.svm.lin.C1 <- 1 - sum(pred.svm.lin.C1 == test.set$diabetes) / n.test
+
+
+pred.svm.lin.C10 <- predict(svm.linear.C10, newdata = test.set)
+error.svm.lin.C10 <- 1 - sum(pred.svm.lin.C10 == test.set$diabetes) / n.test
+
+```
+
+
+
+\newpage
+
+### Porównanie wyników dla różnych funkcji jądrowych
+
+```{r}
+
+svm.poly2  <- svm(diabetes~glucose+insulin, data=training.set, kernel="polynomial", degree = 2)
+svm.poly4  <- svm(diabetes~glucose+insulin, data=training.set, kernel="polynomial", degree = 4)
+svm.radial <- svm(diabetes~glucose+insulin, data=training.set, kernel="radial")
+svm.radial.gamma0.1 <- svm(diabetes~glucose+insulin, data=training.set, kernel="radial", gamma=0.1)
+svm.radial.gamma1 <- svm(diabetes~glucose+insulin, data=training.set, kernel="radial", gamma=1)
+```
+
+
+```{r, fig.cap="Jądro wielomianowe (stopień 2)"}
+plot(svm.poly2, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r, fig.cap="Jądro wielomianowe (stopień 4)"}
+plot(svm.poly4, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r, fig.cap= "Jądro radialne (gamma = 0.5)"}
+plot(svm.radial, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r, fig.cap="Jądro radialne (gamma = 0.1)"}
+plot(svm.radial.gamma0.1, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+```{r, fig.cap="Jądro radialne (gamma = 1)"}
+plot(svm.radial.gamma1, data=training.set, glucose~insulin, svSymbol=16, grid=100)
+```
+
+\newpage
+
+**Porównanie dokładności:**
+
+```{r}
+set.seed(123)
+pred.svm.poly2  <- predict(svm.poly2, newdata=test.set)
+pred.svm.poly4  <- predict(svm.poly4, newdata=test.set)
+pred.svm.radial <- predict(svm.radial, newdata=test.set)
+pred.svm.radial.gamma0.1 <- predict(svm.radial.gamma0.1, newdata=test.set)
+pred.svm.radial.gamma1 <- predict(svm.radial.gamma1, newdata=test.set)
+```
+
+```{r}
+set.seed(123)
+acc.svm.poly2  <- 1- sum(diag(table(pred.svm.poly2, real.labels)))/n.test
+acc.svm.poly4  <- 1- sum(diag(table(pred.svm.poly4, real.labels)))/n.test
+acc.svm.radial <- 1- sum(diag(table(pred.svm.radial, real.labels)))/n.test
+acc.svm.radial.gamma0.1 <- 1- sum(diag(table(pred.svm.radial.gamma0.1, real.labels)))/n.test
+acc.svm.radial.gamma1 <- 1- sum(diag(table(pred.svm.radial.gamma1, real.labels)))/n.test
+
+svm_results <- tibble::tibble(
+  `Funkcja jądrowa / parametr` = c(
+    "Liniowa (C = 0.1)",
+    "Liniowa (C = 1)",
+    "Liniowa (C = 10)",
+    "Wielomianowa (stopień 2)",
+    "Wielomianowa (stopień 4)",
+    "RBF (gamma = 0.5)",
+    "RBF (gamma = 0.1)",
+    "RBF (gamma = 1)"
+  ),
+  `Błąd klasyfikacji` = c(
+    error.svm.lin.C0.1,
+    error.svm.lin.C1,
+    error.svm.lin.C10,
+    acc.svm.poly2,
+    acc.svm.poly4,
+    acc.svm.radial,
+    acc.svm.radial.gamma0.1,
+    acc.svm.radial.gamma1
+  )
+)
+
+kable(svm_results, digits = 4,
+      caption = "Porównanie błędu klasyfikacji modeli SVM z różnymi funkcjami jądrowymi i parametrami")
+```
+
+
+* W przypadku jąder liniowych zmiana parametru *C* nie prowadzi do istotnych różnic w błędzie klasyfikacji – wszystkie wyniki są bardzo zbliżone.
+
+* Wybór stopnia wielomianu w funkcji jądrowej nie wpłynął znacząco na wynik — zarówno dla stopnia 2, jak i 4 błąd klasyfikacji pozostał na zbliżonym poziomie, jednak warto podkreślić, że ten rodzaj jądra wypadł zdecydowanie najgorzej.
+
+* Z kolei dla funkcji z jądrem radialnym obserwujemy większe zróżnicowanie wyników. Dla  gamma = 1 uzyskaliśmy najlepszy wynik.
+
+### Jądro gaussowskie (optymalizujemy C i gamma)
+
+**Najlepsze parametry i najniższy błąd na zbiorze uczącym:**
+
+```{r}
+set.seed(150)
+gamma.range <- 2^((-8):4)
+C.range <- 2^((-4):4)
+radial.tune <- tune(svm, train.x=training.set[,c("glucose", "insulin")],
+                    train.y=training.set[,"diabetes"],
+                    kernel="radial",
+                    ranges=list(cost=C.range, gamma=gamma.range))
+
+print(radial.tune)
+C.best <- radial.tune$best.parameters[["cost"]]
+gamma.best <- radial.tune$best.parameters[["gamma"]]
+```
+
+```{r}
+
+plot(radial.tune, transform.x=log, transform.y=log, color.palette = topo.colors,
+     main = "Błąd klasyfikacji SVM (jądro RDF) w zależności od gamma i C")
+```
+
+**Dopasowujemy końcowy model dla optymalnych parametrów**
+
+```{r}
+set.seed(150)
+svm.radial.tuned <- svm(diabetes~glucose+insulin,
+                        data=training.set, kernel="radial",
+                        cost=C.best, gamma=gamma.best)
+
+cat("Kernel:", svm.radial.tuned$kernel, "\n")
+cat("Liczba wektorów nośnych:", nrow(svm.radial.tuned$SV), "\n")
+cat("Liczba klas:", length(svm.radial.tuned$levels), "\n")
+cat("Poziomy klas:", paste(svm.radial.tuned$levels, collapse = ", "), "\n")
+cat("Parametry jądra:\n")
+cat("  - cost (C):", C.best, "\n")
+cat("  - gamma:", gamma.best, "\n")
+```
+
+
+```{r}
+set.seed(150)
+pred.svm.radial.tuned <- predict(svm.radial.tuned, newdata=test.set)
+acc.svm.radial.tuned <- 1- sum(diag(table(pred.svm.radial.tuned, real.labels)))/n.test
+acc.svm.radial <- 1- sum(diag(table(pred.svm.radial, real.labels)))/n.test
+```
+
+```{r}
+set.seed(150)
+svm_radial_ <- tibble::tibble(
+  `Model` = c("SVM radialne (domyślne parametry)", "SVM radialne (po tuningu)"),
+  `Błąd klasyfikacji` = c(acc.svm.radial, acc.svm.radial.tuned)
+)
+
+kable(svm_radial_, digits = 4, caption = "Porównanie błędu klasyfikacji na zbiorze testowym: SVM radialne (przed i po tuningu)")
+```
+
+* Optymalizacja parametrów pozwoliła na poprawę skuteczności skonstruowanego klasyfikatora
+
+## Porównanie skuteczności metod
+
+```{r}
+set.seed(150)
+
+results <- data.frame(
+  Metoda = c(
+             "SVM Wielomian st. 2",
+             "SVM Wielomian st. 4",
+             "SVM Radial tuned",
+             "SVM Radial, gamma = 0.5",
+             "SVM Radial, gamma = 0.1",
+             "SVM Radial, gamma = 1",
+             "SVM Liniowy, C=0.1",
+             "SVM Liniowy, C=1",
+             "SVM Liniowy, C=10",
+             "Bagging, nbagg=25",
+             "Random Forest, ntree=100"),
+  Blad_klasyfikacyjny = c(
+                         acc.svm.poly2,
+                         acc.svm.poly4,
+                         acc.svm.radial.tuned,
+                         acc.svm.radial,
+                         acc.svm.radial.gamma0.1,
+                         acc.svm.radial.gamma1,
+                         error.svm.lin.C0.1,
+                         error.svm.lin.C1,
+                         error.svm.lin.C10,
+                         error.bagging$error,
+                         error.randomForest$error)
+)
+
+results$Blad_klasyfikacyjny <- round(results$Blad_klasyfikacyjny, 3)
+
+kable(results, col.names = c("Metoda", "Błąd klasyfikacyjny"), 
+      caption = "Porównanie błędów klasyfikacyjnych różnych metod")
+
+```
+
+**Wniosek:**
+
+Metody zespołowe (*Bagging* oraz *Random Forest*) zdecydowanie przewyższają skutecznością pojedyncze metody SVM na tym zbiorze danych. Najlepszym modelem okazał się *Random Forest*, który osiągnął najniższy błąd klasyfikacyjny i tym samym najlepszą zdolność do generalizacji.
+
