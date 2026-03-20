@@ -8,7 +8,7 @@ Evaluated and compared unsupervised discretization methods (Equal Width, Equal F
 
 ### Principal Component Analysis (City Quality of Life dataset):
 
-Performed PCA on a multidimensional dataset of global city metrics. The analysis includes data standardization, variance evaluation, and interpreting loadings to identify the most significant indicators of urban quality of life.
+Performed PCA on a multidimensional dataset of global city metrics. The analysis includes data standardization, variance evaluation and interpreting loadings to identify the most significant indicators of urban quality of life.
 
 ## Report_2
 
@@ -22,4 +22,4 @@ Built and evaluated multiple baseline models, including:
 * Support Vector Machines (SVM)
 
 Model Evaluation:
-Used rigorous statistical validation techniques, including 10-fold Cross-Validation, Bootstrap, and the .632+ estimator to assess generalization capabilities and minimize classification errors.
+Used rigorous statistical validation techniques, including 10-fold Cross-Validation, Bootstrap and the .632+ estimator to assess generalization capabilities and minimize classification errors.
