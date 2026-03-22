@@ -12,7 +12,7 @@ Performed PCA on a multidimensional dataset of global city metrics. The analysis
 
 ## Report_2
 
-### Comparative Classification Analysis (Pima Indians Diabetes dataset)
+### Comparative Classification Analysis (PimaIndiansDiabetes2 dataset)
 
 Built and evaluated multiple baseline models, including:
 * k-Nearest Neighbors (k-NN)
